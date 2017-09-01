@@ -155,7 +155,7 @@ function getEmitter() {
     }
   });
 
-  emitter.on('log', stdout.write.bind(stdout));
+  emitter.on('log', console.log.bind(console.log));
 
   return emitter;
 }
@@ -245,46 +245,39 @@ function watch(options, emitter) {
 
   var graph = buildGraph(options);
 
-  var paths = [];
-  if (options.directory) {
-    paths.push(path.resolve(options.directory, '**/*.{sass,scss}'));
+  var paths;
+  if (options.directory){
+    paths = path.resolve(options.directory, '**/*.{sass,scss}');
+  } else {
+    paths = options.src;
   }
 
-  for (var i in graph.index) {
-    paths.push(i);
-  }
-
-  var watcher = chokidar.watch(paths, {
-    followSymlinks: options.follow
-  });
+  var watcher = chokidar.watch(paths);
 
   watcher.on('error', function(error) {
       emitter.emit.bind(emitter, 'error');
   });
 
-  watcher.on('change', function(file) {
-    var files = [file];
+  function watchHandler(event) {
+    return function(file) {
+      emitter.emit('log', util.format('Detected %s: %s', event, file));
+      var files = [file];
 
-    // descendents may be added, so we need a new graph
-    graph = buildGraph(options);
-    graph.visitAncestors(file, function(parent) {
-      files.push(parent);
-    });
+      // descendents may be added, so we need a new graph
+      graph = buildGraph(options);
+      graph.visitAncestors(file, function(parent) {
+        files.push(parent);
+      });
 
-    // Add children to watcher
-    graph.visitDescendents(file, function(child) {
-      if (paths.indexOf(child) === -1) {
-        paths.push(child);
-        watcher.add(child);
-      }
-    });
-
-    files.forEach(function(file) {
-      if (path.basename(file)[0] !== '_') {
-        renderFile(file, options, emitter);
-      }
-    });
-  });
+      files.forEach(function(file) {
+        if (path.basename(file)[0] !== '_') {
+          renderFile(file, options, emitter);
+        }
+      });
+    };
+  }
+  watcher.on('change', watchHandler('change'));
+  watcher.on('add', watchHandler('new file'));
 }
 
 /**
@@ -348,9 +341,6 @@ function run(options, emitter) {
  */
 function renderFile(file, options, emitter) {
   options = getOptions([path.resolve(file)], options);
-  if (options.watch) {
-    emitter.emit('warn', util.format('=> changed: %s', file));
-  }
   render(options, emitter);
 }
 
@@ -367,7 +357,7 @@ function renderDir(options, emitter) {
     if (err) {
       return emitter.emit('error', util.format('You do not have permission to access this path: %s.', err.path));
     } else if (!files.length) {
-      return emitter.emit('warn', 'No input files were found.');
+      return emitter.emit('warn', 'No input file was found.');
     }
 
     forEach(files, function(subject) {
